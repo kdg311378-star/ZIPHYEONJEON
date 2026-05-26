@@ -100,6 +100,13 @@ const RealPriceCalculationPage = () => {
             // 타이틀 및 필터 상태에 구(Gugun) 이름 반영
             setSearchParams(prev => ({ ...prev, gugun: targetGugun }));
 
+            // [추가] 실거래가 매물 조회 시 최근 본 매물에 추가
+            try {
+                await interactionService.addRecentRecord(masterId);
+            } catch (recordErr) {
+                console.warn("방문 기록 갱신 실패:", recordErr);
+            }
+
             // [찜 여부 확인]
             try {
                 const likedRes = await interactionService.getLikedHouses();

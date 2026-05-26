@@ -348,7 +348,7 @@ const AuthPage = () => {
                                 </div>
 
                                 <button type="submit" disabled={isLoading} className={`w-full py-3.5 rounded-xl font-black text-base transition-all shadow-lg ${isLoading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white shadow-blue-900/40 hover:bg-blue-500 hover:-translate-y-1'}`}>
-                                    {isLoading ? "처리 중..." : (mode === 'login' ? '시스템 접속하기' : '가입 심사 요청')}
+                                    {isLoading ? "처리 중..." : (mode === 'login' ? '로그인 하기' : '회원가입')}
                                 </button>
 
                                 {mode === 'login' && (
