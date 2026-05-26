@@ -1,0 +1,126 @@
+{
+  "model_version": "commercial-rent-v1",
+  "reference_quarter": "2026Q1",
+  "target": "monthly_rent_manwon",
+  "target_formula": "predicted_rent(t+h) = predicted_base_rent(t) * reb_trend_prior(h) * exp(predicted_log_residual_h), observed_rent = trade_amount_manwon * (reb_income_yield_percent / 100) / 12",
+  "training_structure": "base_plus_reb_trend_prior_plus_residual",
+  "unit": "만원/월",
+  "confidence": "medium",
+  "rows": 70021,
+  "horizon_months": {
+    "h1m": 1,
+    "h3m": 3,
+    "h6m": 6
+  },
+  "trend_prior_ratio_by_horizon": {
+    "h1m": {
+      "오피스": 1.0,
+      "중대형 상가": 1.0,
+      "집합 상가": 1.0,
+      "__global__": 1.0
+    },
+    "h3m": {
+      "오피스": 1.0136879692364036,
+      "중대형 상가": 1.0069744446364457,
+      "집합 상가": 1.005352402294387,
+      "__global__": 1.0067360547895827
+    },
+    "h6m": {
+      "오피스": 1.0306513409961684,
+      "중대형 상가": 1.0192307692307694,
+      "집합 상가": 1.0091240875912408,
+      "__global__": 1.0150375939849623
+    }
+  },
+  "backtest": {
+    "h1m": {
+      "horizon_months": 1,
+      "sample_count": 7521,
+      "fold_count": 4,
+      "cv_mean": {
+        "mae": 34.76756206517566,
+        "rmse": 118.33236249046783,
+        "mape": 68.44461205044513,
+        "smape": 44.3645682497394,
+        "r2": 0.6624448593635344
+      },
+      "cv_std": {
+        "mae": 8.611217726822698,
+        "rmse": 26.186732453316004,
+        "mape": 4.926547764377078,
+        "smape": 4.099162792629452,
+        "r2": 0.07851730330798226
+      },
+      "top_segment_errors_sigungu": []
+    },
+    "h3m": {
+      "horizon_months": 3,
+      "sample_count": 12369,
+      "fold_count": 4,
+      "cv_mean": {
+        "mae": 40.48947493793213,
+        "rmse": 152.68828426504444,
+        "mape": 100.35909899061024,
+        "smape": 43.053173989628164,
+        "r2": 0.4113789586188573
+      },
+      "cv_std": {
+        "mae": 11.08322368348501,
+        "rmse": 33.07738295866463,
+        "mape": 44.06177631775364,
+        "smape": 1.204374044363875,
+        "r2": 0.11329364731005892
+      },
+      "top_segment_errors_sigungu": []
+    },
+    "h6m": {
+      "horizon_months": 6,
+      "sample_count": 4980,
+      "fold_count": 4,
+      "cv_mean": {
+        "mae": 43.90944760443091,
+        "rmse": 139.07866180768025,
+        "mape": 98.59160659962994,
+        "smape": 50.84828186084928,
+        "r2": 0.5661603739549159
+      },
+      "cv_std": {
+        "mae": 9.976295263705618,
+        "rmse": 40.65304547886182,
+        "mape": 30.789026815252058,
+        "smape": 1.794841976044792,
+        "r2": 0.11329364320569256
+      },
+      "top_segment_errors_sigungu": []
+    }
+  },
+  "training_device": {
+    "base": "cpu",
+    "h1m": "cpu",
+    "h3m": "cpu",
+    "h6m": "gpu"
+  },
+  "metrics": {
+    "h1m": {
+      "mae": 34.76756206517566,
+      "rmse": 118.33236249046783,
+      "mape": 68.44461205044513,
+      "smape": 44.3645682497394,
+      "r2": 0.6624448593635344
+    },
+    "h3m": {
+      "mae": 40.48947493793213,
+      "rmse": 152.68828426504444,
+      "mape": 100.35909899061024,
+      "smape": 43.053173989628164,
+      "r2": 0.4113789586188573
+    },
+    "h6m": {
+      "mae": 43.90944760443091,
+      "rmse": 139.07866180768025,
+      "mape": 98.59160659962994,
+      "smape": 50.84828186084928,
+      "r2": 0.5661603739549159
+    }
+  }
+}

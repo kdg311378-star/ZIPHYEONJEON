@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+pandas
+numpy
+joblib
+scikit-learn
+lightgbm
+openpyxl
