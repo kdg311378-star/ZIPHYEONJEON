@@ -23,30 +23,18 @@ FEATURE_COLUMNS = [
     "commercial_type",
     "building_use",
     "zoning",
-    "road_condition",
     "area_m2",
     "area_bin",
-    "land_area_m2",
     "floor",
     "floor_bin",
     "built_year",
     "building_age",
-    "lat",
-    "lng",
-    "bus_boarding_500m",
-    "bus_alighting_500m",
-    "subway_boarding_500m",
-    "subway_alighting_500m",
     "year",
     "month",
     "quarter",
-    "reb_income_yield",
-    "reb_capital_yield",
-    "reb_investment_yield",
     "reb_regional_rent",
     "reb_rent_index",
     "reb_noi",
-    "reb_floor_utility",
 ]
 
 CATEGORICAL_COLUMNS = [
@@ -54,7 +42,6 @@ CATEGORICAL_COLUMNS = [
     "commercial_type",
     "building_use",
     "zoning",
-    "road_condition",
     "area_bin",
     "floor_bin",
     "quarter",
@@ -71,7 +58,6 @@ PANEL_GROUP_COLUMNS = [
     "commercial_type",
     "building_use",
     "zoning",
-    "road_condition",
     "area_bin",
     "floor_bin",
 ]
@@ -329,7 +315,16 @@ def add_reb_features(trades: pd.DataFrame, reb: pd.DataFrame) -> pd.DataFrame:
 
 def prepare_training_frame(data_dir: Path) -> pd.DataFrame:
     df = add_reb_features(load_trade_data(data_dir), load_reb_features(data_dir))
-    df["observed_rent"] = df["trade_amount"] * (df["reb_income_yield"] / 100.0) / 12.0
+    income_yield = df["reb_income_yield"].astype(float).copy()
+    yield_median = float(income_yield.dropna().median()) if income_yield.notna().any() else np.nan
+    if np.isfinite(yield_median) and yield_median < 2.0:
+        income_yield = income_yield * 4.0
+
+    rent_from_yield = df["trade_amount"] * (income_yield / 100.0) / 12.0
+    # reb_regional_rent is typically in 천원/㎡, convert to 만원/월 for area_m2.
+    rent_from_reb_anchor = (df["reb_regional_rent"] * df["area_m2"]) / 10.0
+    df["observed_rent"] = 0.65 * rent_from_yield + 0.35 * rent_from_reb_anchor
+    df["observed_rent"] = df["observed_rent"].clip(lower=0.0)
     df["yyyymm"] = (df["year"].astype(float) * 100 + df["month"].astype(float)).astype("Int64")
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna(subset=["observed_rent", "area_m2", "trade_amount", "yyyymm"])
@@ -541,6 +536,118 @@ def build_reb_trend_priors(panel: pd.DataFrame) -> tuple[Dict[str, Dict[str, flo
     return priors, trend_tables
 
 
+def build_inference_profiles(panel: pd.DataFrame) -> Dict[str, object]:
+    value_cols = [
+        "lat",
+        "lng",
+        "bus_boarding_500m",
+        "bus_alighting_500m",
+        "subway_boarding_500m",
+        "subway_alighting_500m",
+        "reb_income_yield",
+        "reb_capital_yield",
+        "reb_investment_yield",
+        "reb_regional_rent",
+        "reb_rent_index",
+        "reb_noi",
+        "reb_floor_utility",
+    ]
+
+    by_sigungu_type_df = (
+        panel.groupby(["sigungu", "commercial_type"], as_index=False)[value_cols]
+        .median(numeric_only=True)
+        .fillna(np.nan)
+    )
+    by_type_df = panel.groupby(["commercial_type"], as_index=False)[value_cols].median(numeric_only=True).fillna(np.nan)
+    global_series = panel[value_cols].median(numeric_only=True)
+
+    def _row_to_dict(row: pd.Series) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for col in value_cols:
+            val = row.get(col)
+            out[col] = float(val) if pd.notna(val) else float("nan")
+        return out
+
+    by_sigungu_type: Dict[str, Dict[str, Dict[str, float]]] = {}
+    for _, row in by_sigungu_type_df.iterrows():
+        sigungu = str(row["sigungu"])
+        ctype = str(row["commercial_type"])
+        by_sigungu_type.setdefault(sigungu, {})[ctype] = _row_to_dict(row)
+
+    by_type: Dict[str, Dict[str, float]] = {}
+    for _, row in by_type_df.iterrows():
+        by_type[str(row["commercial_type"])] = _row_to_dict(row)
+
+    global_profile = {col: (float(global_series[col]) if pd.notna(global_series[col]) else float("nan")) for col in value_cols}
+    return {
+        "by_sigungu_commercial_type": by_sigungu_type,
+        "by_commercial_type": by_type,
+        "global": global_profile,
+    }
+
+
+def build_segment_calibration_and_bands(panel: pd.DataFrame) -> Dict[str, object]:
+    out: Dict[str, object] = {"calibration_by_horizon": {}, "bands_by_horizon": {}}
+    segment_cols = ["sigungu", "commercial_type", "area_bin"]
+    for horizon in HORIZON_MONTHS.keys():
+        target_col = f"target_{horizon}"
+        temp = panel.dropna(subset=["rent_t", target_col]).copy()
+        temp = temp[(temp["rent_t"] > 0) & (temp[target_col] > 0)].copy()
+        if temp.empty:
+            out["calibration_by_horizon"][horizon] = {"by_segment": {}, "by_type": {}, "global": 1.0}
+            out["bands_by_horizon"][horizon] = {"by_segment": {}, "by_type": {}, "global": {"p10": 0.0, "p90": 0.0}}
+            continue
+
+        temp["ratio"] = temp[target_col] / temp["rent_t"]
+
+        seg_ratio = temp.groupby(segment_cols)["ratio"].median().reset_index()
+        type_ratio = temp.groupby(["commercial_type"])["ratio"].median().reset_index()
+        global_ratio = float(temp["ratio"].median())
+
+        seg_band = temp.groupby(segment_cols)[target_col].quantile([0.1, 0.9]).unstack().reset_index()
+        seg_band.columns = segment_cols + ["p10", "p90"]
+        type_band = temp.groupby(["commercial_type"])[target_col].quantile([0.1, 0.9]).unstack().reset_index()
+        type_band.columns = ["commercial_type", "p10", "p90"]
+        global_p10 = float(temp[target_col].quantile(0.1))
+        global_p90 = float(temp[target_col].quantile(0.9))
+
+        seg_ratio_map: Dict[str, Dict[str, Dict[str, float]]] = {}
+        for _, row in seg_ratio.iterrows():
+            s = str(row["sigungu"])
+            c = str(row["commercial_type"])
+            a = str(row["area_bin"])
+            seg_ratio_map.setdefault(s, {}).setdefault(c, {})[a] = float(row["ratio"])
+
+        type_ratio_map = {str(r["commercial_type"]): float(r["ratio"]) for _, r in type_ratio.iterrows()}
+
+        seg_band_map: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
+        for _, row in seg_band.iterrows():
+            s = str(row["sigungu"])
+            c = str(row["commercial_type"])
+            a = str(row["area_bin"])
+            seg_band_map.setdefault(s, {}).setdefault(c, {})[a] = {
+                "p10": float(row["p10"]),
+                "p90": float(row["p90"]),
+            }
+
+        type_band_map = {
+            str(r["commercial_type"]): {"p10": float(r["p10"]), "p90": float(r["p90"])}
+            for _, r in type_band.iterrows()
+        }
+
+        out["calibration_by_horizon"][horizon] = {
+            "by_segment": seg_ratio_map,
+            "by_type": type_ratio_map,
+            "global": global_ratio,
+        }
+        out["bands_by_horizon"][horizon] = {
+            "by_segment": seg_band_map,
+            "by_type": type_band_map,
+            "global": {"p10": global_p10, "p90": global_p90},
+        }
+    return out
+
+
 def resolve_data_dir(data_dir: Optional[str]) -> Path:
     if data_dir:
         return Path(data_dir).expanduser()
@@ -588,9 +695,13 @@ def train_models(df: pd.DataFrame, output_dir: Path, device: str):
     panel = attach_horizon_targets(build_monthly_panel(df))
     panel = panel[(panel["rent_t"] > 0)].copy()
     trend_priors, trend_tables = build_reb_trend_priors(panel)
+    inference_profiles = build_inference_profiles(panel)
+    segment_meta = build_segment_calibration_and_bands(panel)
     metrics: Dict[str, Dict[str, float]] = {}
     backtest: Dict[str, Dict[str, object]] = {}
     used_devices = {}
+    residual_log_bounds_by_horizon: Dict[str, Dict[str, float]] = {}
+    target_ratio_bounds_by_horizon: Dict[str, Dict[str, float]] = {}
 
     base_df = panel.dropna(subset=["rent_t"]).copy()
     base_df["rent_t"] = winsorize_series(base_df["rent_t"])
@@ -616,6 +727,25 @@ def train_models(df: pd.DataFrame, output_dir: Path, device: str):
             horizon_df["trend_ratio"] = horizon_df["trend_ratio"].fillna(default_prior).clip(lower=0.7, upper=1.4)
         else:
             horizon_df["trend_ratio"] = horizon_df["trend_ratio"].fillna(default_prior).clip(lower=0.5, upper=1.8)
+
+        raw_ratio_log = np.log(horizon_df[target_col] / horizon_df["rent_t"]) - np.log(horizon_df["trend_ratio"])
+        residual_low = float(np.nanquantile(raw_ratio_log.to_numpy(dtype=float), 0.01))
+        residual_high = float(np.nanquantile(raw_ratio_log.to_numpy(dtype=float), 0.99))
+        residual_low = max(residual_low, -1.0)
+        residual_high = min(residual_high, 1.0)
+        if residual_low >= residual_high:
+            residual_low, residual_high = -0.7, 0.7
+        residual_log_bounds_by_horizon[horizon] = {"low": residual_low, "high": residual_high}
+
+        raw_target_ratio = (horizon_df[target_col] / horizon_df["rent_t"]).to_numpy(dtype=float)
+        ratio_low = float(np.nanquantile(raw_target_ratio, 0.01))
+        ratio_high = float(np.nanquantile(raw_target_ratio, 0.99))
+        ratio_low = max(ratio_low, 0.3)
+        ratio_high = min(ratio_high, 3.0)
+        if ratio_low >= ratio_high:
+            ratio_low, ratio_high = 0.6, 1.8
+        target_ratio_bounds_by_horizon[horizon] = {"low": ratio_low, "high": ratio_high}
+
         horizon_df[target_col] = winsorize_series(horizon_df[target_col])
         if horizon_df.empty:
             raise RuntimeError(f"No training rows for {horizon}. Check source data coverage.")
@@ -631,6 +761,7 @@ def train_models(df: pd.DataFrame, output_dir: Path, device: str):
                 X_train[col] = X_train[col].astype("category")
                 X_valid[col] = X_valid[col].astype("category")
             y_train_ratio_log = np.log(train_fold[target_col] / train_fold["rent_t"]) - np.log(train_fold["trend_ratio"])
+            y_train_ratio_log = y_train_ratio_log.clip(lower=residual_low, upper=residual_high)
             fold_weights = recency_weights(train_fold["yyyymm"])
             if horizon == "h3m":
                 fold_weights = fold_weights * 1.2
@@ -647,6 +778,7 @@ def train_models(df: pd.DataFrame, output_dir: Path, device: str):
         for col in CATEGORICAL_COLUMNS:
             X_all[col] = X_all[col].astype("category")
         y_all_ratio_log = np.log(horizon_df[target_col] / horizon_df["rent_t"]) - np.log(horizon_df["trend_ratio"])
+        y_all_ratio_log = y_all_ratio_log.clip(lower=residual_low, upper=residual_high)
         all_weights = recency_weights(horizon_df["yyyymm"])
         if horizon == "h3m":
             all_weights = all_weights * 1.2
@@ -682,7 +814,9 @@ def train_models(df: pd.DataFrame, output_dir: Path, device: str):
                 X_valid_last[col] = X_valid_last[col].astype("category")
             last_model, _ = fit_lgbm_with_device(
                 X_train_last,
-                np.log(train_fold[target_col] / train_fold["rent_t"]) - np.log(train_fold["trend_ratio"]),
+                (
+                    np.log(train_fold[target_col] / train_fold["rent_t"]) - np.log(train_fold["trend_ratio"])
+                ).clip(lower=residual_low, upper=residual_high),
                 device,
                 sample_weight=recency_weights(train_fold["yyyymm"]),
             )
@@ -711,6 +845,11 @@ def train_models(df: pd.DataFrame, output_dir: Path, device: str):
         "backtest": backtest,
         "training_device": used_devices,
         "metrics": metrics,
+        "residual_log_bounds_by_horizon": residual_log_bounds_by_horizon,
+        "target_ratio_bounds_by_horizon": target_ratio_bounds_by_horizon,
+        "inference_feature_profiles": inference_profiles,
+        "segment_calibration_by_horizon": segment_meta.get("calibration_by_horizon", {}),
+        "segment_bands_by_horizon": segment_meta.get("bands_by_horizon", {}),
     }
     (config_dir / "model_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return metrics
