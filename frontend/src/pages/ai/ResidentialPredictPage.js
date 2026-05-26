@@ -128,6 +128,13 @@ const ResidentialPredictPage = () => {
         recent: updateList(prev.recent)
       }));
 
+      // [추가] 최근 본 매물 DB 저장을 위한 API 호출
+      try {
+        await interactionService.addRecentRecord(hId);
+      } catch (recordErr) {
+        console.warn("방문 기록 추가 실패:", recordErr);
+      }
+
       // 데이터가 채워진 후 자동으로 AI 예측 실행
       executeAIPrediction(true, autoFillData);
     } catch (err) {
