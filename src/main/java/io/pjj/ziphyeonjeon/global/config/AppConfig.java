@@ -27,7 +27,7 @@ public class AppConfig {
         restTemplate.getInterceptors().add(new ClientHttpRequestInterceptor() {
             @Override
             public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
-                int maxRetries = 6;
+                int maxRetries = 15;
                 int retryCount = 0;
                 while (true) {
                     try {
@@ -39,6 +39,9 @@ public class AppConfig {
                         if ((statusCode == 502 || statusCode == 503 || statusCode == 504) && retryCount < maxRetries) {
                             retryCount++;
                             log.warn("[AI Wakeup Retry] AI Service might be sleeping. Retrying ({}/{}) for {}", retryCount, maxRetries, request.getURI());
+                            if (response != null) {
+                                response.close(); // IMPORTANT: Close the response to prevent connection leaks
+                            }
                             sleepSafely(10000); // Wait 10 seconds before retrying
                             continue;
                         }
