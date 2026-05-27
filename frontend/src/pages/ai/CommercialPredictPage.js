@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { commercialService } from 'api/ai/commercialService';
 import {
     Chart as ChartJS,
@@ -40,6 +40,17 @@ const CommercialPredictPage = () => {
     });
     const [result, setResult] = useState(null);
     const [isPredicting, setIsPredicting] = useState(false);
+
+    // [Render AI 서버 Pre-warming Ping]
+    useEffect(() => {
+        // Render의 무료 인스턴스는 일정 시간 미사용 시 꺼집니다.
+        // 백엔드에서 찌르면 '내부 통신망'으로 간주되어 Render가 깨워주지 않으므로,
+        // 사용자가 이 페이지에 접속하자마자 클라이언트(브라우저) 측에서 핑을 날려 AI 서버를 미리 깨웁니다.
+        const wakeupUrl = process.env.REACT_APP_AI_COMMERCIAL_API_URL 
+                          || 'https://ziphyeonjeon-ai.onrender.com';
+        fetch(`${wakeupUrl}/health`, { mode: 'no-cors' })
+            .catch(e => console.log('AI 서버 Pre-warming Ping 전송 완료(에러 무시):', e));
+    }, []);
 
     const handlePredict = async (e) => {
         e.preventDefault();
