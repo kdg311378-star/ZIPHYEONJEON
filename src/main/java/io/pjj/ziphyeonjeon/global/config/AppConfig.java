@@ -27,9 +27,6 @@ public class AppConfig {
         restTemplate.getInterceptors().add(new ClientHttpRequestInterceptor() {
             @Override
             public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
-                // Force a fresh connection for every request to ensure Render's load balancer
-                // detects it as a new request and wakes up the asleep instance.
-                // Using stale Keep-Alive connections causes Render to instantly return 502.
                 request.getHeaders().set("Connection", "close");
 
                 int maxRetries = 15;
