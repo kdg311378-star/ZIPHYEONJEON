@@ -112,4 +112,5 @@ def predict_store_rent(req_data: CommercialRentPredictionRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8010, reload=True)
+    port = int(os.environ.get("PORT", 8010))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
