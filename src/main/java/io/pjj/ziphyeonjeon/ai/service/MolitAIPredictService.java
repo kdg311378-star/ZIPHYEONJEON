@@ -26,7 +26,7 @@ public class MolitAIPredictService {
 
     private final AnalysisRepository analysisRepository;
     private final io.pjj.ziphyeonjeon.PriceSearch.repository.HouseRepository houseRepository;
-    private final RestTemplate restTemplate;
+    private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${ai.python.api.url:http://localhost:8000}")
     private String pythonApiUrl;
