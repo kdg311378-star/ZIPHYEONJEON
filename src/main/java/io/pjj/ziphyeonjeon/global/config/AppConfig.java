@@ -27,6 +27,9 @@ public class AppConfig {
         restTemplate.getInterceptors().add(new ClientHttpRequestInterceptor() {
             @Override
             public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
+
+                request.getHeaders().set("Connection", "close");
+
                 int maxRetries = 15;
                 int retryCount = 0;
                 while (true) {
